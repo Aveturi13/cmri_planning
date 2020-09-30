@@ -6,3 +6,4 @@ logs/
 predictions/
 trainedmodels/
 __pycache__/
+__init__.pyc

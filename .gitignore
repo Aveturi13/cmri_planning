@@ -1,0 +1,8 @@
+.DS_Store
+play_area.py
+checkpoints/
+dataset/
+logs/
+predictions/
+trainedmodels/
+__pycache__/

@@ -13,6 +13,7 @@ from data_processing import semseg, paramest
 from metrics.dice import dice_score
 from networks import unet, alexnet
 
+import tensorflow as tf
 import tensorflow.keras
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
@@ -26,24 +27,24 @@ from keras import backend as K
 now = time.localtime()
 current_time = time.strftime("%H:%M:%S", now)
 
-learning_methods = ['segmentation', 'parameter_estimation']
+models = ['unet', 'alexnet']
 #model_choices = ['unet', 'alexnet']
 #losses = ['BCE', 'MSE']
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--method', help='Learning method for task', choices=learning_methods)
+	parser.add_argument('--model', help='Models to train', choices=models)
 	parser.add_argument('--epochs', help='Number of epochs to train', type=int, default=30)
 	parser.add_argument('--batch_size', help='Batch size', default=32, type=int)
 	parser.add_argument('--lr', default=1e-02, help='Learning rate', type=float)
-	parser.add_argument('--img_dir', help='Full dataset of images (will be split into train/test)')
-	parser.add_argument('--params', help='CSV file containing line params (will be split in train/test)')
+	parser.add_argument('--img_dir', help='Filepath to images dataset')
+	parser.add_argument('--params', help='Path to csv file containing 2Ch line parameters')
 	parser.add_argument('--split', help='Proportion of data to reserve for testing', default=0.25)
-	parser.add_argument('--crop_size', default=(160, 160), help='Dimensions to crop the image')
+	parser.add_argument('--resize_dim', default=(160, 160), help='Dimensions to resize the image')
 	#parser.add_argument('--model', help="Name of model to train on", choices=model_choices)
 	parser.add_argument('--callbacks', action='store_true', help="Set up model callbacks")
 	#parser.add_argument('--loss', help="Loss function to optimize model", choices=losses)
-	parser.add_argument('--model_log_dir', help="Filepath to save model logs", type=str)
+	#parser.add_argument('--model_log_dir', help="Filepath to save model logs", type=str)
 	parser.add_argument('--model_save_dir', help="Filepath to save trained models", type=str)
 	parser.add_argument('--batchnorm', action='store_true', help='Adds batch normalization')
 	parser.add_argument('--dropout', help='Amount of dropout regularlization. Must be a value in [0, 1).', default=0.0)
@@ -56,43 +57,57 @@ if __name__ == '__main__':
 		print('Missing the Image / Params directory!')
 		sys.exit(1)
 
+	# Check if gpu availible
+	physical_devices = tf.config.list_physical_devices('GPU')
+	print("Number of GPUs: ", len(physical_devices))
+
 	#Setup model configuration dictionary
-	model_config = {'method': args.method,
+	model_config = {'model': args.model,
 	                'epochs': args.epochs,
 	 				'batch_size': args.batch_size,
 	 				'lr': args.lr,
 	 				'img_dir': args.img_dir,
 	 				'params': args.params,
 	 				'split':args.split,
-	 				'crop_size':args.crop_size,
+	 				'resize_dim':args.resize_dim,
 	 				#'model': args.model,
 	 				'callbacks': args.callbacks,
 	 				#'loss': args.loss,
-	 				'model_log_dir': args.model_log_dir,
+	 				#'model_log_dir': args.model_log_dir,
 	 				'model_save_dir': args.model_save_dir,
 	 				'batchnorm': args.batchnorm,
-	 				'dropout': args.dropout, 
+	 				'dropout': args.dropout,
 	 				'verbose': args.verbose}
 
 	#Create model
-	if args.method == 'segmentation':
+	if args.model == 'unet':
+		if args.verbose:
+			print("\n{} Creating Dataset...".format(current_time))
 
-		print("\n{} Creating Dataset...".format(current_time))
 		data = semseg.Dataset(model_config['img_dir'], model_config['params'])
-		
-		print("Number of patients : " + str(data.len))
 
-		print("{} Splitting into Train/Test sets...".format(current_time))
+		if args.verbose:
+			print("Number of patients : " + str(data.len))
+
+		if args.verbose:
+			print("{} Splitting into Train/Test sets...".format(current_time))
+
 		train_X, train_y, val_X, val_y = data.split(shuffle=True, split=model_config['split'])
 
-		print("{} Previewing an Image...".format(current_time))
-		data.generate_preview(train_X[0], train_y[0], model_config['crop_size'])
+		if args.verbose:
+			print("{} Previewing an Image...".format(current_time))
 
-		print("{} Creating Data Generator...".format(current_time))
-		train_generator = data.data_generator(train_X, train_y, resize_dim=model_config['crop_size'], batch_size=model_config['batch_size'])
+		data.generate_preview(train_X[0], train_y[0], model_config['resize_dim'])
+
+		if args.verbose:
+			print("{} Creating Data Generator...".format(current_time))
+
+		train_generator = data.data_generator(train_X, train_y, resize_dim=model_config['resize_dim'], batch_size=model_config['batch_size'])
 		validation_data = data.preprocess_data(val_X, val_y)
 
-		print("{} Setting up Model...\n".format(current_time))
+		if args.verbose:
+			print("{} Setting up Model...\n".format(current_time))
+
 		model = unet.unet(batchnorm=model_config['batchnorm'], dropout=model_config['dropout'])
 
 		#Print a model summary
@@ -100,19 +115,21 @@ if __name__ == '__main__':
 			print("Model Summary:")
 			print(model.summary())
 
-		print("\n{} Compiling Model...".format(current_time))
+		if args.verbose:
+			print("\n{} Compiling Model...".format(current_time))
+
 		optimizer = Adam(lr=0.01)
 		model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=[MeanIoU(num_classes=2)])
 
-	if args.method == 'parameter_estimation':
+	if args.model == 'alexnet':
 		#Add code on data generators!
 		train_generator = None
 		validation_data = None
 		model = alexnet(batchnorm=model_config['batchnorm'], dropout=model_config['dropout'])
 		model.compile(optimizer=Adam(), loss='mean_square_error', metrics=['accuracy'])
 
-	if not args.method:
-		print('Method must be specified in order to train model.')
+	if not args.model:
+		print('Model must be specified.')
 		sys.exit(1)
 
 	#Create model
@@ -138,7 +155,7 @@ if __name__ == '__main__':
 
 	def filename():
 		""" Creates a human readable filename"""
-		return '{}-bn{}-{}dp-{}e-{}bs-{}lr.h5'.format(model_config['method'],
+		return '{}-bn{}-{}dp-{}e-{}bs-{}lr.h5'.format(model_config['model'],
 												  model_config['batchnorm'],
 												  model_config['dropout'],
 												  model_config['epochs'],
@@ -149,23 +166,24 @@ if __name__ == '__main__':
 	def build_callbacks(checkpoints=True, tensorboard=True):
 		""" Set model callbacks here """
 
-		#Create checkpoints directory
-		if not os.path.exists('checkpoints'):
-			os.mkdir('checkpoints')
-
 		callbacks = []
 
 		if checkpoints:
+
+			#Create checkpoints directory
+			if not os.path.exists('checkpoints'):
+				os.mkdir('checkpoints')
+
 			#Monitor different metrics based on type of model
-			if model_config['method'] == 'segmentation':
-				checkpoint = ModelCheckpoint(filepath = 'checkpoints/'+filename(), 
+			if model_config['model'] == 'unet':
+				checkpoint = ModelCheckpoint(filepath = 'checkpoints/'+filename(),
 											monitor= 'val_dice_score',
 											verbose=1,
 											save_best_only=True,
 											mode='max')
 
-			if model_config['method'] == 'parameter_estimation':
-				checkpoint = ModelCheckpoint(filepath = 'checkpoints/'+filename(), 
+			if model_config['model'] == 'alexnet':
+				checkpoint = ModelCheckpoint(filepath = 'checkpoints/'+filename(),
 											monitor= 'val_accuracy',
 											verbose=1,
 											save_best_only=True,
@@ -173,37 +191,45 @@ if __name__ == '__main__':
 
 			callbacks.append(checkpoint)
 
-		if tensorboard and args.model_log_dir:
-			log_dir = os.path.join(model_config['model_log_dir'], filename()[:-3])
+		if tensorboard:
+			#Create logs directory
+			if not os.path.exists('logs/'):
+				os.mkdir('logs/')
+
+			log_dir = os.path.join('logs/', filename()[:-3])
 			tensorboard_callback = TensorBoard(log_dir=log_dir)
 			callbacks.append(tensorboard_callback)
 
 		return callbacks
 
 	if model_config['callbacks']:
-		print("{} Setting up Callbacks...".format(current_time))
+		if args.verbose:
+			print("{} Setting up Callbacks...".format(current_time))
 		callbacks = build_callbacks()
 	else:
 		callbacks = None
 
 	#Train model
-	print("{} Model Training...\n".format(current_time))
+	if args.verbose:
+		print("{} Model Training...\n".format(current_time))
 
 	train_steps = len(train_X) // model_config['batch_size']
 
-	model.fit(x=train_generator, 
-			  epochs= model_config['epochs'], 
-			  verbose= model_config['verbose'], 
+	model.fit(x=train_generator,
+			  epochs= model_config['epochs'],
+			  verbose= model_config['verbose'],
 			  callbacks=callbacks,
 			  validation_data=validation_data,
 			  steps_per_epoch=train_steps)
 
-	print("{} Training Complete\n".format(current_time))
+	if args.verbose:
+		print("{} Training Complete\n".format(current_time))
 
 	#Save model
 	if args.model_save_dir:
 
-		print("{} Saving Model...".format(current_time))
+		if args.verbose:
+			print("{} Saving Model...".format(current_time))
 
 		#Create the directory, if it doesn't exist
 		if not os.path.exists(model_config['model_save_dir']):
@@ -211,4 +237,5 @@ if __name__ == '__main__':
 
 		model.save(os.path.join(model_config['model_save_dir'], filename()))
 
-		print("{} Model Saved!".format(current_time))
+		if args.verbose:
+			print("{} Model Saved!".format(current_time))

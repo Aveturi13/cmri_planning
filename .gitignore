@@ -7,4 +7,4 @@ predictions/
 trainedmodels/
 __pycache__/
 images/
-__init__.pyc
+*.pyc
